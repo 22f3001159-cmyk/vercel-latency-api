@@ -1,54 +1,62 @@
 import json
 import statistics
-from http.server import BaseHTTPRequestHandler
 
-# Load telemetry data
-with open("telemetry.json") as f:
-    DATA = json.load(f)
+def handler(request):
 
-class handler(BaseHTTPRequestHandler):
+    # Enable CORS
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+    }
 
-    def _set_headers(self):
-        self.send_response(200)
-        self.send_header("Content-type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
+    if request.method == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": headers
+        }
 
-    def do_OPTIONS(self):
-        self._set_headers()
+    if request.method != "POST":
+        return {
+            "statusCode": 405,
+            "headers": headers,
+            "body": json.dumps({"error": "Only POST allowed"})
+        }
 
-    def do_POST(self):
-        content_length = int(self.headers["Content-Length"])
-        body = self.rfile.read(content_length)
-        request = json.loads(body)
+    body = json.loads(request.body)
 
-        regions = request.get("regions", [])
-        threshold = request.get("threshold_ms", 0)
+    regions = body.get("regions", [])
+    threshold = body.get("threshold_ms", 0)
 
-        result = {}
+    with open("telemetry.json") as f:
+        data = json.load(f)
 
-        for region in regions:
-            records = [r for r in DATA if r["region"] == region]
+    result = {}
 
-            latencies = [r["latency_ms"] for r in records]
-            uptimes = [r["uptime_pct"] for r in records]
+    for region in regions:
+        records = [r for r in data if r["region"] == region]
 
-            if not latencies:
-                continue
+        if not records:
+            continue
 
-            avg_latency = statistics.mean(latencies)
-            p95_latency = statistics.quantiles(latencies, n=100)[94]
-            avg_uptime = statistics.mean(uptimes)
-            breaches = sum(1 for l in latencies if l > threshold)
+        latencies = [r["latency_ms"] for r in records]
+        uptimes = [r["uptime_pct"] for r in records]
 
-            result[region] = {
-                "avg_latency": avg_latency,
-                "p95_latency": p95_latency,
-                "avg_uptime": avg_uptime,
-                "breaches": breaches
-            }
+        avg_latency = statistics.mean(latencies)
+        p95_latency = statistics.quantiles(latencies, n=100)[94]
+        avg_uptime = statistics.mean(uptimes)
+        breaches = sum(1 for l in latencies if l > threshold)
 
-        self._set_headers()
-        self.wfile.write(json.dumps(result).encode())
+        result[region] = {
+            "avg_latency": avg_latency,
+            "p95_latency": p95_latency,
+            "avg_uptime": avg_uptime,
+            "breaches": breaches
+        }
+
+    return {
+        "statusCode": 200,
+        "headers": headers,
+        "body": json.dumps(result)
+    }
+
